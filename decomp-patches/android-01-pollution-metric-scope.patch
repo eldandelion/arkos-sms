@@ -5,7 +5,7 @@ Reason: Android: stop completed pollution metric scopes before ordinary scene dr
 @@ -1,4 +1,8 @@
  #include <Map/PollutionCount.hpp>
 +
-+#ifdef __ANDROID__
++#if defined(__ANDROID__) || defined(SMS_GX_GLES)
 +extern "C" void GXPC_EndPixMetric(void);
 +#endif
  #include <Map/PollutionLayer.hpp>
@@ -15,7 +15,7 @@ Reason: Android: stop completed pollution metric scopes before ordinary scene dr
  	u32 discard;
  	GXReadPixMetric(&discard, &discard, &discard, &discard, mCounters[token],
  	                &discard);
-+#ifdef __ANDROID__
++#if defined(__ANDROID__) || defined(SMS_GX_GLES)
 +	// Every pollution count starts with GXClearPixMetric. Nothing reads the
 +	// intervening world draws, so leave them out of this completed scope.
 +	GXPC_EndPixMetric();

@@ -4,7 +4,7 @@
 #include <cstdint>
 
 namespace gx { namespace android {
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
 void install(void* (*getProc)(const char*));
 bool desktopEntry(const char* name);
 std::string shaderSource(const std::string& source, unsigned type);

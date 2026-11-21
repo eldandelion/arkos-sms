@@ -7,6 +7,7 @@
 #include "port_stub.h"
 #include "port_os.h"
 #include <dolphin/os.h>
+#include <cerrno>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -479,23 +480,22 @@ void port_install_crash_handlers()
 // its SDK translations and GX window follow a relocated compatibility arena.
 u8* port_mem1_base;
 u32 port_mem1_size;
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_RELOCATABLE_MEM1)
 extern "C" __attribute__((weak)) void GXPC_SetMemoryWindow(void* base, uint32_t size);
 #endif
 
 #ifndef _WIN32
-// mmap exactly at `want` without replacing an existing mapping. Linux has
-// MAP_FIXED_NOREPLACE; Darwin's MAP_FIXED silently replaces whatever is there
-// (dylibs, graphics driver memory: the low 4 GiB is shared with the system
-// once PAGEZERO is shrunk), so pass `want` as a hint and reject any other
-// placement.
+// mmap exactly at `want` without replacing an existing mapping. Linux 4.17+ has
+// MAP_FIXED_NOREPLACE; older kernels (e.g. RK3326 BSP Linux 4.4) and Darwin do
+// not, so fall back to passing `want` as a hint and reject any other placement.
 static void* map_exact(void* want, size_t size)
 {
+	void* p = MAP_FAILED;
 #ifdef MAP_FIXED_NOREPLACE
-	void* p = mmap(want, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-#else
-	void* p = mmap(want, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	p = mmap(want, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+	if (p == MAP_FAILED && (errno == EINVAL || errno == EOPNOTSUPP))
 #endif
+	p = mmap(want, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	if (p == want)
 		return p;
 	if (p != MAP_FAILED)
@@ -524,7 +524,7 @@ static void map_mem1()
 #else
 	void* p = map_exact(want, port_mem1_size);
 	if (p != want) {
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_RELOCATABLE_MEM1)
 		port_log("[port] MEM1 address 0x80000000 unavailable; reserving another compatibility range\n");
 		p = port_low_alloc(port_mem1_size);
 		// Stacks prefer the low half, but MEM1 already normally lives at
@@ -552,14 +552,14 @@ static void map_mem1()
 #endif
 	// ArenaHi itself is also rounded/stored through u32 by the game, so an
 	// exclusive end exactly at 4 GiB is incompatible even if all bytes fit.
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_RELOCATABLE_MEM1)
 	if (!port_mem1_size || (uint64_t)(uintptr_t)p + port_mem1_size >= 0x100000000ULL) {
 		port_log("[port] MEM1 arena endpoints do not fit the compatibility address window\n");
 		exit(1);
 	}
 #endif
 	port_mem1_base = (u8*)p;
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_RELOCATABLE_MEM1)
 	// FIFO/GD commands store MEM1-relative addresses. Relocation must change
 	// the renderer's default 0x80000000 window before the game emits any.
 	if (GXPC_SetMemoryWindow) GXPC_SetMemoryWindow(p, port_mem1_size);
@@ -623,9 +623,9 @@ void* port_low_alloc(unsigned long size)
 			next += (size + 0xFFFFu) & ~(uintptr_t)0xFFFFu;
 			return q;
 		}
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_RELOCATABLE_MEM1)
 		// A large failed request must not skip a smaller aligned hole that
-		// still fits it between Android's existing mappings.
+		// still fits it between existing low-VA mappings.
 		next += 0x100000u;
 #else
 		next += (size + 0xFFFFu) & ~(uintptr_t)0xFFFFu;

@@ -1,0 +1,29 @@
+# Anbernic RG351P controller layout for Super Mario Sunshine
+# RG351P has digital L1/L2/R1/R2 switches; split FLUDD soft/full press across R1/R2.
+#
+#   R1 (PAD_RB)  -> R_SOFT (Run & spray at 40% trigger)
+#   R2 (PAD_RT)  -> R      (Stop & aim spray at 100% trigger)
+#   L1 (PAD_LB)  -> Z      (Map)
+#   L2 (PAD_LT)  -> L      (Center camera / Ground pound)
+#   L3 + R3      -> SAVE_STATE / LOAD_STATE
+
+A = SPACE PAD_A
+B = LSHIFT PAD_B
+X = V PAD_X
+Y = F PAD_Y
+Z = Z PAD_LB
+L = Q PAD_LT
+R = E PAD_RT
+R_SOFT = PAD_RB
+L_SOFT = PAD_LSTICK
+START = ENTER PAD_START
+DPAD_UP = 1 PAD_DPUP
+DPAD_DOWN = 2 PAD_DPDOWN
+DPAD_LEFT = 3 PAD_DPLEFT
+DPAD_RIGHT = 4 PAD_DPRIGHT
+STICK_UP = UP
+STICK_DOWN = DOWN
+STICK_LEFT = LEFT
+STICK_RIGHT = RIGHT
+SAVE_STATE = F5 PAD_BACK+PAD_RB
+LOAD_STATE = F6 PAD_BACK+PAD_LB

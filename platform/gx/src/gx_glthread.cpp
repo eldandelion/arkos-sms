@@ -137,7 +137,12 @@ bool enabled() {
     static int on = -1;
     if (on < 0) {
         const char* e = getenv("SMS_GX_GL_THREAD");
+#if defined(__ANDROID__)
+        // Android's Java SurfaceView binds the EGL context on the main thread.
+        on = (e && e[0] == '1') ? 1 : 0;
+#else
         on = !(e && e[0] == '0');
+#endif
 #if defined(_WIN32) && !defined(_WIN64)
         on = 0;  // the proxies do not follow 32-bit Windows' __stdcall GL entry points
 #endif

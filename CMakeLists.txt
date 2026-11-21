@@ -30,11 +30,22 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g" CACHE STRING "" FORCE)
 # resource structs). Build -m32 when the host has multilib; otherwise fall back
 # to -m64 so compile work can proceed.
 set(SMS_ARCH "auto" CACHE STRING "auto, 32 or 64")
+option(SMS_GLES "Use OpenGL ES 3.1+ backend instead of desktop OpenGL 3.3" OFF)
+option(SMS_RELOCATABLE_MEM1 "Allow MEM1 to relocate below 4 GiB if 0x80000000 is occupied" OFF)
+set(SMS_CPU_FLAGS "" CACHE STRING "Optional target CPU compile flags (e.g. -march=armv8-a -mtune=cortex-a35)")
+
+set(_sms_is_arm64 FALSE)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+  set(_sms_is_arm64 TRUE)
+endif()
+
 if(ANDROID)
   if(NOT CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
     message(FATAL_ERROR "Android releases support arm64-v8a only")
   endif()
   set(SMS_ARCH 64)
+  set(SMS_GLES ON)
+  set(SMS_RELOCATABLE_MEM1 ON)
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   # AGP invokes Ninja directly, whose default parallelism follows CPU count.
   # Bound native compilation independently of Gradle workers so the game,
@@ -46,6 +57,13 @@ if(ANDROID)
   # Debug APKs keep Java debugging and native symbols, but the game's DSP,
   # decoder and renderer need optimization just as desktop builds do.
   add_compile_options(-O2)
+elseif(_sms_is_arm64 AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(SMS_ARCH 64)
+  set(SMS_RELOCATABLE_MEM1 ON)
+  if(NOT SMS_CPU_FLAGS)
+    # Default to baseline ARMv8-A so Cortex-A35/A53 handhelds never hit ARMv8.1 LSE SIGILL.
+    set(SMS_CPU_FLAGS "-march=armv8-a")
+  endif()
 endif()
 if(SMS_ARCH STREQUAL "auto")
   include(CheckCXXSourceCompiles)
@@ -61,9 +79,13 @@ if(SMS_ARCH STREQUAL "auto")
     message(WARNING "-m32 does not link here (install gcc-multilib g++-multilib); building -m64")
   endif()
 endif()
-if(NOT ANDROID)
+if(NOT ANDROID AND NOT _sms_is_arm64)
   add_compile_options(-m${SMS_ARCH})
   add_link_options(-m${SMS_ARCH})
+endif()
+if(SMS_CPU_FLAGS)
+  separate_arguments(_sms_cpu_flags_list UNIX_COMMAND "${SMS_CPU_FLAGS}")
+  add_compile_options(${_sms_cpu_flags_list})
 endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   # RUNPATH, not RPATH: a toolchain's library directory (the launcher's conda
@@ -72,7 +94,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   # an older libdrm there stops a newer Mesa loading: no window and no EGL.
   add_link_options("LINKER:--enable-new-dtags")
 endif()
-message(STATUS "SMS port: building -m${SMS_ARCH}")
+message(STATUS "SMS port: building arch=${SMS_ARCH} processor=${CMAKE_SYSTEM_PROCESSOR} gles=${SMS_GLES} reloc_mem1=${SMS_RELOCATABLE_MEM1}")
 
 # --- Decomp translation units -----------------------------------------------
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -109,6 +131,12 @@ include(${CMAKE_BINARY_DIR}/decomp_sources.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/patches.cmake)
 
 set(SMS_COMMON_DEFS GEKKO TARGET_PC VERSION_GMSE01 BUILD_VERSION=2 NDEBUG=1)
+if(SMS_RELOCATABLE_MEM1)
+  list(APPEND SMS_COMMON_DEFS SMS_RELOCATABLE_MEM1=1)
+endif()
+if(SMS_GLES)
+  list(APPEND SMS_COMMON_DEFS SMS_GX_GLES=1)
+endif()
 set(SMS_GAME_FLAGS
   -w -fno-strict-aliasing -fwrapv -fno-omit-frame-pointer
   # Retail MSL has no _FORTIFY_SOURCE checks (Ubuntu g++ enables them at -O1+;

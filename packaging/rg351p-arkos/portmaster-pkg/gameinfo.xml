@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<gameList>
+  <game>
+    <path>./Super Mario Sunshine.sh</path>
+    <name>Super Mario Sunshine</name>
+    <desc>Native Linux ARM64 decompilation port of Super Mario Sunshine (based on chasem-dev/sms-pc-port) with OpenGL ES 3.1+ rendering and RG351P digital FLUDD controls.</desc>
+    <releasedate>20020826T000000</releasedate>
+    <developer>Nintendo EAD / chasem-dev</developer>
+    <publisher>Nintendo</publisher>
+    <genre>Platformer</genre>
+    <image>./sms/cover.png</image>
+  </game>
+</gameList>

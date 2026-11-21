@@ -87,7 +87,7 @@ bool load(void* (*getProc)(const char*)) {
 #define SMS_GX_LOAD_OPTIONAL(type, name) gx_##name = reinterpret_cast<type>(getProc(#name));
     SMS_GX_GL_OPTIONAL_FUNCS(SMS_GX_LOAD_OPTIONAL)
 #undef SMS_GX_LOAD_OPTIONAL
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
     if (ok) gx::android::install(getProc);
 #endif
 #if !(defined(_WIN32) && !defined(_WIN64))

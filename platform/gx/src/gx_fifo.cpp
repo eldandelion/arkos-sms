@@ -1279,7 +1279,16 @@ void callDisplayList(const uint8_t* data, uint32_t size) {
     e.misses = misses;
     e.hashAlways = hashAlways;
     if (misses >= 3) e.skip = 4u << (misses - 3 < 8 ? misses - 3 : 8);
-    if (s_dlCacheBytes > (size_t(96) << 20)) {  // keep the cache bounded: start over
+    static size_t dlCacheLimit = 0;
+    if (!dlCacheLimit) {
+        size_t mb = 96;
+        if (const char* e = getenv("SMS_GX_DL_CACHE_MB")) {
+            long v = strtol(e, nullptr, 10);
+            if (v >= 4 && v <= 512) mb = size_t(v);
+        }
+        dlCacheLimit = mb << 20;
+    }
+    if (s_dlCacheBytes > dlCacheLimit) {  // keep the cache bounded: start over
         dlClear();
         runCommands(data, size);
         return;

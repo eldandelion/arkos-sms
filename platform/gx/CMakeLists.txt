@@ -6,6 +6,11 @@ set(SMS_DECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../decomp" CACHE PATH "Path t
 # The decomp's game headers and the SDK's (libs/dolphin/include).
 set(SMS_GX_DECOMP_INCLUDE ${SMS_DECOMP_DIR}/include ${SMS_DECOMP_DIR}/libs/dolphin/include)
 option(SMS_GX_BUILD_TESTS "Build the headless self-test" ON)
+option(SMS_GLES "Use OpenGL ES 3.1+ backend instead of desktop OpenGL 3.3" OFF)
+set(_sms_gx_gles OFF)
+if(ANDROID OR SMS_GLES)
+    set(_sms_gx_gles ON)
+endif()
 
 set(SMS_GX_SOURCES
     src/gl_loader.cpp
@@ -23,7 +28,7 @@ set(SMS_GX_SOURCES
     src/gx_texture.cpp
     src/gx_trace.cpp
     src/gx_vert.cpp)
-if(ANDROID)
+if(_sms_gx_gles)
     list(APPEND SMS_GX_SOURCES src/gx_android.cpp)
 endif()
 
@@ -58,8 +63,11 @@ target_include_directories(sms_gx
     ${CMAKE_CURRENT_SOURCE_DIR}/../../src)
 # macOS has no system GL/glcorearb.h; ship Khronos headers under third_party/.
 # The GL thread's waits run the main run loop there (CoreFoundation).
-if(APPLE OR ANDROID)
+if(APPLE OR _sms_gx_gles)
     target_include_directories(sms_gx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
+endif()
+if(_sms_gx_gles)
+    target_compile_definitions(sms_gx PRIVATE SMS_GX_GLES=1)
 endif()
 if(APPLE)
     target_link_libraries(sms_gx PUBLIC "-framework CoreFoundation")
@@ -117,6 +125,8 @@ if(WIN32)
     # HDR output: a Direct3D 11 swap chain shares the frame with OpenGL (gx_hdr.cpp)
     target_link_libraries(sms_gx PUBLIC d3d11 dxgi)
 endif()
+find_package(Threads REQUIRED)
+target_link_libraries(sms_gx PUBLIC Threads::Threads)
 if(SMS_GX_EGL_LIB AND SMS_GX_EGL_INCLUDE)
     target_compile_definitions(sms_gx PRIVATE SMS_GX_HAVE_EGL=1)
     target_link_libraries(sms_gx PUBLIC ${SMS_GX_EGL_LIB})
@@ -126,7 +136,10 @@ else()
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(sms_gx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wno-unused-function -fno-strict-aliasing>)
+    target_compile_options(sms_gx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O3 -Wall -Wno-unused-function -fno-strict-aliasing>)
+endif()
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
+    target_link_libraries(sms_gx PUBLIC stdc++fs)
 endif()
 
 if(SMS_GX_BUILD_TESTS)
@@ -160,10 +173,16 @@ if(SMS_GX_BUILD_TESTS)
         add_library(gx_selftest SHARED tests/gx_selftest.cpp ${SMS_GX_MSL_MATH} ${SMS_GX_PORT_CHEATS})
     else()
         add_executable(gx_selftest tests/gx_selftest.cpp ${SMS_GX_MSL_MATH} ${SMS_GX_PORT_CHEATS})
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            target_link_options(gx_selftest PRIVATE -no-pie)
+        endif()
     endif()
     target_include_directories(gx_selftest PRIVATE ${SMS_GX_TYPES_INCLUDE} ${SMS_GX_DECOMP_INCLUDE} ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    if(APPLE OR ANDROID)
+    if(APPLE OR _sms_gx_gles)
         target_include_directories(gx_selftest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
+    endif()
+    if(_sms_gx_gles)
+        target_compile_definitions(gx_selftest PRIVATE SMS_GX_GLES=1)
     endif()
     target_link_libraries(gx_selftest PRIVATE sms_gx)
     target_compile_features(gx_selftest PRIVATE cxx_std_17)

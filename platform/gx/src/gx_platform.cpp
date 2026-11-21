@@ -349,7 +349,7 @@ bool openWindow(float scale) {
     // from here on a display exists: a failure is the window's or the context's
     s_windowFailure = WF_WINDOW;
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
 #else
@@ -570,6 +570,14 @@ void* eglGetProc(const char* name) { return reinterpret_cast<void*>(eglGetProcAd
 bool tryEglDisplay(EGLDisplay dpy) {
     EGLint major, minor;
     if (dpy == EGL_NO_DISPLAY || !eglInitialize(dpy, &major, &minor)) return false;
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
+    if (!eglBindAPI(EGL_OPENGL_ES_API)) return false;
+    const EGLint cfgAttr[] = {EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT, EGL_NONE};
+    EGLConfig cfg;
+    EGLint n = 0;
+    if (!eglChooseConfig(dpy, cfgAttr, &cfg, 1, &n) || n < 1) return false;
+    const EGLint ctxAttr[] = {EGL_CONTEXT_MAJOR_VERSION, 3, EGL_CONTEXT_MINOR_VERSION, 1, EGL_NONE};
+#else
     if (!eglBindAPI(EGL_OPENGL_API)) return false;
     const EGLint cfgAttr[] = {EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT, EGL_NONE};
     EGLConfig cfg;
@@ -577,6 +585,7 @@ bool tryEglDisplay(EGLDisplay dpy) {
     if (!eglChooseConfig(dpy, cfgAttr, &cfg, 1, &n) || n < 1) return false;
     const EGLint ctxAttr[] = {EGL_CONTEXT_MAJOR_VERSION, 3, EGL_CONTEXT_MINOR_VERSION, 3,
                               EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT, EGL_NONE};
+#endif
     EGLContext ctx = eglCreateContext(dpy, cfg, EGL_NO_CONTEXT, ctxAttr);
     if (ctx == EGL_NO_CONTEXT) return false;
     if (eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx)) return true;
@@ -738,7 +747,10 @@ uint32_t GXPC_FrameCount(void) { return s_frame; }
 
 int GXPC_InitAuto(float efbScale) {
     if (rendererReady()) return 1;
-    if (const char* e = getenv("SMS_GX_SCALE")) efbScale = atof(e) >= 1.0 ? std::min(8.0f, float(atof(e))) : efbScale;
+    if (const char* e = getenv("SMS_GX_SCALE")) {
+        double v = atof(e);
+        if (v >= 0.5) efbScale = std::min(8.0f, float(v));
+    }
     if (envTrue("SMS_VSYNC")) s_vsync = strcmp(getenv("SMS_VSYNC"), "adaptive") == 0 ? -1 : 1;
     bool headless;
     if (s_forceHeadless >= 0) headless = s_forceHeadless != 0;
@@ -807,7 +819,7 @@ void GXPC_Present(const void* xfb) {
             savestateOverlayRender(w, h);
             captureWindow(s_frame, w, h);
             t1 = nowSeconds();
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
             // Diagnostic only: separate unfinished GPU work from buffer
             // presentation. Keep the total swap timer unchanged so it can
             // still be compared with ordinary runs. This forces completion
@@ -824,7 +836,7 @@ void GXPC_Present(const void* xfb) {
             if (hdr) hdrFramePresent(s_vsync != 0);
             else SDL_GL_SwapWindow(s_window);
             tSwapped = nowSeconds();
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
             if (finish) {
                 static unsigned frames = 0;
                 static double completion = 0, swap = 0;

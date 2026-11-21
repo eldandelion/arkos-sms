@@ -5,6 +5,7 @@
 #include "gl_funcs.h"
 #include "gx_internal.h"
 #include "gx_android.h"
+#include "gx_glthread.h"
 #include <cstring>
 #include <array>
 #include <unordered_map>
@@ -48,6 +49,8 @@ struct UniformState {
     bool destWritten = false, pointWritten = false, lodWritten = false;
 };
 std::unordered_map<GLuint, UniformState> uniformStates;
+GLuint cachedUniformProg = 0;
+UniformState* cachedUniformState = nullptr;
 
 bool has(const char* name) {
     GLint n = 0;
@@ -66,16 +69,22 @@ bool unsupported(GLenum cap) {
 void uniforms() {
     if (!program) return;
     // Metric draws can switch programs for every triangle. Uniform lookup is
-    // a synchronous driver round trip on some Android drivers and emulators;
-    // cache locations and the values retained by each linked program.
-    auto entry = uniformStates.try_emplace(program);
-    UniformState& u = entry.first->second;
-    if (entry.second) {
-        u.logicOp = glGetUniformLocation(program, "u_smsLogicOp");
-        u.logicDest = glGetUniformLocation(program, "u_smsLogicDest");
-        u.point = glGetUniformLocation(program, "u_smsPointSize");
-        u.lod = glGetUniformLocation(program, "u_smsLodBias");
+    // a synchronous driver round trip on some drivers; cache the active program
+    // pointer as well as locations/values per linked program.
+    UniformState* up = (program == cachedUniformProg) ? cachedUniformState : nullptr;
+    if (!up) {
+        auto entry = uniformStates.try_emplace(program);
+        up = &entry.first->second;
+        if (entry.second) {
+            up->logicOp = glGetUniformLocation(program, "u_smsLogicOp");
+            up->logicDest = glGetUniformLocation(program, "u_smsLogicDest");
+            up->point = glGetUniformLocation(program, "u_smsPointSize");
+            up->lod = glGetUniformLocation(program, "u_smsLodBias");
+        }
+        cachedUniformProg = program;
+        cachedUniformState = up;
     }
+    UniformState& u = *up;
     const GLint operation = logicEnabled ? GLint(logic - GL_CLEAR) : -1;
     if (u.logicOp >= 0 && operation != u.lastLogic) {
         glUniform1i(u.logicOp, operation); u.lastLogic = operation;
@@ -87,20 +96,31 @@ void uniforms() {
         glUniform1f(u.point, pointSize); u.lastPoint = pointSize; u.pointWritten = true;
     }
     if (u.lod >= 0) {
-        std::array<GLfloat, 8> values{};
-        for (int i = 0; i < 8; ++i) {
-            auto bias = samplerBias.find(unitSampler[i]);
-            if (bias != samplerBias.end()) values[i] = bias->second;
-        }
-        if (!u.lodWritten || values != u.lastLod) {
-            glUniform1fv(u.lod, 8, values.data()); u.lastLod = values; u.lodWritten = true;
+        if (!samplerBias.empty()) {
+            std::array<GLfloat, 8> values{};
+            for (int i = 0; i < 8; ++i) {
+                auto bias = samplerBias.find(unitSampler[i]);
+                if (bias != samplerBias.end()) values[i] = bias->second;
+            }
+            if (!u.lodWritten || values != u.lastLod) {
+                glUniform1fv(u.lod, 8, values.data()); u.lastLod = values; u.lodWritten = true;
+            }
+        } else if (!u.lodWritten) {
+            static const GLfloat zeros[8] = {};
+            glUniform1fv(u.lod, 8, zeros);
+            u.lastLod = {};
+            u.lodWritten = true;
         }
     }
 }
-void deleteProgramAdapter(GLuint p) { uniformStates.erase(p); deleteProgram(p); }
-void linkProgramAdapter(GLuint p) { uniformStates.erase(p); linkProgram(p); }
+void invalidateUniformCache(GLuint p) {
+    if (cachedUniformProg == p) { cachedUniformProg = 0; cachedUniformState = nullptr; }
+    uniformStates.erase(p);
+}
+void deleteProgramAdapter(GLuint p) { invalidateUniformCache(p); deleteProgram(p); }
+void linkProgramAdapter(GLuint p) { invalidateUniformCache(p); linkProgram(p); }
 void programBinaryAdapter(GLuint p, GLenum format, const void* binary, GLsizei size) {
-    uniformStates.erase(p); programBinary(p, format, binary, size);
+    invalidateUniformCache(p); programBinary(p, format, binary, size);
 }
 void samplerAdapter(GLuint sampler, GLenum name, GLfloat value) {
     if (name == GL_TEXTURE_LOD_BIAS) { samplerBias[sampler] = value; uniforms(); }
@@ -236,7 +256,10 @@ void replace(std::string& s, const std::string& from, const std::string& to) {
 
 bool metricActive() { return metricOn; }
 bool geometryShaders() { return geometryExtension != nullptr; }
-void memoryBarrier(unsigned bits) { entry<PFNGLMEMORYBARRIERPROC>("glMemoryBarrier")(GLbitfield(bits)); }
+void memoryBarrier(unsigned bits) {
+    static auto fn = entry<PFNGLMEMORYBARRIERPROC>("glMemoryBarrier");
+    glt::post([bits] { fn(GLbitfield(bits)); });
+}
 bool needsRebasedIndices() { return drawBase == rebaseDraw; }
 IndexRange::IndexRange(size_t sourceOffset, int count, int sourceBase, unsigned buffer, const uint32_t* src)
     : offset(sourceOffset), base(sourceBase) {

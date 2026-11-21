@@ -1,0 +1,27 @@
+# RG351P / ArkOS PortMaster defaults (environment variables in launch script can still override)
+texture_packs = off
+texture_pack_mb = 0
+texture_pack_pending_mb = 0
+shader_warmup = on
+
+# RG351P performance defaults: 4:3 internal EFB (scaled to 0.50x in launch script)
+widescreen = off
+widescreen_hud = centre
+heat_haze = off
+
+# Native GameCube target frame rate for RK3326 performance
+frame_rate = 30
+resolution = 1
+anisotropic = 0
+vsync = off
+fullscreen = on
+msaa = 0
+fxaa = off
+aspect = stretch
+present_filter = bilinear
+
+# Digital trigger soft-press depth (40% = run and spray FLUDD without stopping)
+soft_trigger = 40
+rumble = on
+rumble_strength = 100
+button_prompts = gamecube

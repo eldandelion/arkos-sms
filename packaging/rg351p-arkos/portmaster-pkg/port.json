@@ -1,0 +1,36 @@
+{
+  "version": 4,
+  "name": "sms.zip",
+  "items": [
+    "Super Mario Sunshine.sh",
+    "sms"
+  ],
+  "items_opt": [],
+  "attr": {
+    "title": "Super Mario Sunshine",
+    "porter": [
+      "chasem-dev (upstream sms-pc-port)",
+      "PortMaster RG351P Adaptation"
+    ],
+    "desc": "Native Linux ARM64 decompilation port of Super Mario Sunshine (based on chasem-dev/sms-pc-port with OpenGL ES 3.1+ backend). Tuned for 480x320 handhelds and 1 GB RAM devices such as the Anbernic RG351P running ArkOS.",
+    "desc_md": null,
+    "inst": "Place your legally dumped North American (GMSE01 Rev 0) Super Mario Sunshine disc image (.iso, .gcm, or .ciso) inside ports/sms/gamedata/ before launching.",
+    "inst_md": null,
+    "genres": [
+      "platformer",
+      "action",
+      "adventure"
+    ],
+    "image": null,
+    "rtr": false,
+    "exp": true,
+    "runtime": [],
+    "store": [],
+    "availability": "paid",
+    "reqs": [],
+    "arch": [
+      "aarch64"
+    ],
+    "min_glibc": "2.28"
+  }
+}

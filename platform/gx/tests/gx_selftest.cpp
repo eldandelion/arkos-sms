@@ -202,7 +202,7 @@ int main(int argc, char** argv) {
     // Adreno rejected a standalone gl_ClipDistance redeclaration; removing
     // it must not turn clipping off. Exercise the extension with real pixels.
     bool clipDistances = true;
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
     clipDistances = false;
     GLint extensionCount = 0;
     glGetIntegerv(GL_NUM_EXTENSIONS, &extensionCount);

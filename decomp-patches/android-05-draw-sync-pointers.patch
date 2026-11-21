@@ -2,7 +2,7 @@ Reason: the draw sync thread must recognize FIFO pointers when Android relocates
 --- a/src/System/DrawSyncManager.cpp
 +++ b/src/System/DrawSyncManager.cpp
 @@ -95,0 +96,5 @@
-+#if defined(TARGET_PC) && defined(__ANDROID__)
++#if defined(TARGET_PC) && (defined(__ANDROID__) || defined(SMS_RELOCATABLE_MEM1))
 +		// MEM1 can be relocated below 0x80000000. Tokens are u16 and 0x10000
 +		// stops the thread, so anything above that is a FIFO pointer.
 +		if ((size_t)msg > 0x10000) {

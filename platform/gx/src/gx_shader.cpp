@@ -46,7 +46,7 @@ static int s_earlyFragmentTests = -1;
 bool shaderHasEarlyFragmentTests() {
     if (s_earlyFragmentTests >= 0) return s_earlyFragmentTests != 0;
     s_earlyFragmentTests = 0;
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
     // early_fragment_tests is core in GLES 3.1.
     s_earlyFragmentTests = 1;
 #endif
@@ -344,7 +344,7 @@ static std::string genFS(const ShaderKey& k) {
     if (k.earlyZ & 3) {
         s.insert(s.find('\n') + 1, "#extension GL_ARB_shader_image_load_store : require\nlayout(early_fragment_tests) in;\n");
     }
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
     if (k.earlyZ & 2) s += "layout(std430, binding=0) buffer SmsMetric { uint smsMetricSamples; };\n";
 #endif
     if (k.depthOnly) return s + "void main() { o_color = vec4(0.0); }\n";
@@ -354,7 +354,7 @@ static std::string genFS(const ShaderKey& k) {
          "  ivec4 ras0 = texi(v_c0), ras1 = texi(v_c1);\n"
          "  ivec4 tex = ivec4(255), ras = ivec4(0), konst = ivec4(0);\n"
          "  int bumpA = 0; vec2 prevTc = vec2(0.0);\n";
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
     if ((k.earlyZ & 3) == 3) s += "  atomicAdd(smsMetricSamples, 1u);\n";
 #endif
     // indirect texture lookups
@@ -553,7 +553,7 @@ static std::string genFS(const ShaderKey& k) {
         }
         s += "  color.rgb = mix(color.rgb, u_fogcolor.rgb, f);\n";
     }
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
     if ((k.earlyZ & 3) == 2) s += "  atomicAdd(smsMetricSamples, 1u);\n";
 #endif
     s += "  o_color = color;\n}\n";
@@ -631,7 +631,7 @@ static void setupProgram(GLuint p, ShaderProgram& sp, bool aside = false) {
 }
 
 static uint64_t sourceHash(const std::string& vs, const std::string& fs) {
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
     const std::string vertex = android::shaderSource(vs, GL_VERTEX_SHADER);
     const std::string fragment = android::shaderSource(fs, GL_FRAGMENT_SHADER);
     return hashBytes(vertex.data(), vertex.size(), 0x5348u) ^ hashBytes(fragment.data(), fragment.size(), 0x4653u) * 0x9E3779B97F4A7C15ull;
@@ -1144,7 +1144,7 @@ const ShaderProgram* shaderForCurrentState(bool depthOnly, bool lines, bool metr
     ShaderKey& k = key.k;
     buildKey(k);
     k.depthOnly = depthOnly;
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
     if (metric) k.earlyZ |= 2;
 #else
     (void)metric;

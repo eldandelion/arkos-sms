@@ -184,11 +184,13 @@ struct StreamBuffer {
             return;
         }
         glcBindArrayBuffer(buf);
-#ifdef __ANDROID__
-        // Android emulators synchronously acknowledge map/unmap calls. The
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
+        // GLES emulators/drivers synchronously acknowledge map/unmap calls. The
         // stream's fences already protect these bytes, so submit the known
         // CPU data without mapping a live GPU buffer.
-        glBufferSubData(GL_ARRAY_BUFFER, GLintptr(at), GLsizeiptr(n), data);
+        glt::postData(data, n, [at, n](const uint8_t* d) {
+            glBufferSubData(GL_ARRAY_BUFFER, GLintptr(at), GLsizeiptr(n), d);
+        });
         return;
 #endif
         glt::postData(data, n, [at, n](const uint8_t* d) {
@@ -249,7 +251,17 @@ struct StreamBuffer {
             return;
         }
         glcBindArrayBuffer(buf);
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
+        if (glt::active()) {
+            static std::vector<uint8_t> block;
+            block.resize(end - first);
+            for (int i = 0; i < n; i++) memcpy(block.data() + (pc[i].at - first), pc[i].data, pc[i].bytes);
+            const size_t bytes = block.size();
+            glt::postData(block.data(), bytes, [first, bytes](const uint8_t* d) {
+                glBufferSubData(GL_ARRAY_BUFFER, GLintptr(first), GLsizeiptr(bytes), d);
+            });
+            return;
+        }
         for (int i = 0; i < n; ++i)
             glBufferSubData(GL_ARRAY_BUFFER, GLintptr(pc[i].at), GLsizeiptr(pc[i].bytes), pc[i].data);
         return;
@@ -279,7 +291,7 @@ struct StreamBuffer {
     }
 };
 static StreamBuffer s_stream;
-static const size_t kArenaBytes = size_t(64) << 20;  // the display-list arena after the ring
+static size_t s_arenaBytes = size_t(64) << 20;  // the display-list arena after the ring
 static GLint s_uboAlign = 256;
 
 // One VAO per packed vertex format: attribute pointers into the vertex stream
@@ -1106,7 +1118,7 @@ static void postPresent(GLuint tex, int w, int h, int ox, int oy, int vw, int vh
 }
 
 void rendererInit(float efbScale) {
-    s_scale = efbScale < 1.0f ? 1.0f : efbScale;
+    s_scale = efbScale < 0.5f ? 0.5f : efbScale;
     g_gxStats = g_gxStats || statsEnv();  // settings.txt is read after static initialisation
     const char* renderer = (const char*)glGetString(GL_RENDERER);
     logmsg("OpenGL %s, renderer %s (%s)", (const char*)glGetString(GL_VERSION), renderer,
@@ -1179,7 +1191,16 @@ void rendererInit(float efbScale) {
     glcInvalidate();
     glGenVertexArrays(1, &s_vao);
     glcBindVertexArray(s_vao);
-    s_stream.init(128u << 20, kArenaBytes);
+    size_t streamMb = 128;
+    if (const char* e = getenv("SMS_GX_STREAM_MB")) {
+        long v = strtol(e, nullptr, 10);
+        if (v >= 4 && v <= 512) streamMb = size_t(v);
+    }
+    if (const char* e = getenv("SMS_GX_ARENA_MB")) {
+        long v = strtol(e, nullptr, 10);
+        if (v >= 4 && v <= 256) s_arenaBytes = size_t(v) << 20;
+    }
+    s_stream.init(streamMb << 20, s_arenaBytes);
     // Values of the attributes a packed format leaves out (see vaoForFormat):
     // the same defaults the loader used to write into every vertex.
     glVertexAttrib4f(1, 0.0f, 0.0f, 1.0f, 1.0f);  // normal
@@ -1317,7 +1338,7 @@ void appendDecoded(PrimClass cls, uint32_t fmt, uint32_t stride, const uint8_t* 
 // SMS_GX_DL_ARENA=0 copies them into each batch instead.
 static size_t s_arenaPos = 0;  // from the arena's start
 static uint32_t s_arenaGen = 1;
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
 // GLES 3.1 rebasing reads CPU indices, never a live GPU stream. Retain only
 // arena indices (not vertex data); streamed indices already live in s_bidx.
 static std::unordered_map<size_t, std::vector<uint32_t>> s_arenaIndices;
@@ -1335,15 +1356,15 @@ uint32_t arenaGeneration() { return s_arenaGen; }
 
 bool arenaUpload(const uint8_t* verts, uint32_t n, uint32_t stride, const uint32_t* idx, uint32_t nidx, ArenaRef& out) {
     const size_t vbytes = size_t(n) * stride, ibytes = size_t(nidx) * 4, need = vbytes + stride + ibytes + 4;
-    if (!s_ready || need > kArenaBytes / 8) return false;
-    if (s_arenaPos + need > kArenaBytes) {  // start over, once nothing drawn from the arena is pending
+    if (!s_ready || need > s_arenaBytes / 8) return false;
+    if (s_arenaPos + need > s_arenaBytes) {  // start over, once nothing drawn from the arena is pending
         flushBatch();
         GLsync done = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
         glClientWaitSync(done, GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000ull);
         glDeleteSync(done);
         s_arenaPos = 0;
         s_arenaGen++;
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
         s_arenaIndices.clear();
 #endif
     }
@@ -1352,7 +1373,7 @@ bool arenaUpload(const uint8_t* verts, uint32_t n, uint32_t stride, const uint32
     const size_t iOff = (vOff + vbytes + 3) & ~size_t(3);
     s_stream.writeAt(vOff, verts, vbytes);
     s_stream.writeAt(iOff, idx, ibytes);
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
     if (android::needsRebasedIndices()) s_arenaIndices[iOff].assign(idx, idx + nidx);
 #endif
     s_arenaPos = iOff + ibytes - base;
@@ -2139,7 +2160,7 @@ void flushBatch() {
         size_t iOff;
         GLsizei count;
         GLint base;
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
         const uint32_t* indices = nullptr;
 #endif
     };
@@ -2153,7 +2174,7 @@ void flushBatch() {
             else ranges.push_back(Range{vaoForFormat(s_bfmt), iOff + size_t(sg.first) * 4, GLsizei(sg.count), streamBase});
         }
     }
-    #ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
     if (android::needsRebasedIndices()) {
         for (Range& r : ranges) {
             if (r.iOff < s_stream.size) r.indices = s_bidx.data + (r.iOff - iOff) / 4;
@@ -2251,7 +2272,7 @@ void flushBatch() {
         glColorMask(masks[0], masks[1], masks[2], masks[3]);
         glcUseProgram(sp->prog);
     } else {
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
         // GLES 3.1 lacks base-vertex draws. Use the retained CPU indices for
         // ordinary draws too, avoiding a synchronous GPU index readback.
         for (const Range& r : ranges) {
@@ -2345,8 +2366,14 @@ static GLuint efbReadFbo(int x0 = 0, int y0 = 0, int x1 = INT32_MAX, int y1 = IN
 static void clearRect(int x0, int x1, int y, int h) {
     uint32_t ar = g.bp[BP_CLEAR_AR], gb = g.bp[BP_CLEAR_GB], z = g.bp[BP_CLEAR_Z];
     glBindFramebuffer(GL_FRAMEBUFFER, s_efbFbo);
-    glEnable(GL_SCISSOR_TEST);
-    glScissor(x0, scaled(y), x1 - x0, scaled(y + h) - scaled(y));
+    const int cy0 = scaled(y), ch = scaled(y + h) - cy0;
+    const bool full = x0 <= 0 && x1 >= scaled(s_efbW) && cy0 <= 0 && ch >= scaled(EFB_H);
+    if (full) {
+        glDisable(GL_SCISSOR_TEST);
+    } else {
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(x0, cy0, x1 - x0, ch);
+    }
     bool hasAlpha = (g.bp[BP_PE_CONTROL] & 7) == 1;
     // Copy clears obey the PE write enables, just like ordinary EFB writes.
     // A copy clear in RGB8 must not overwrite the backing alpha used later by
@@ -2604,7 +2631,7 @@ static void prefetchWriteBacks() {
 }
 
 static void prefetchPeeks();
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
 static void pointsFrameShown();
 #endif
 static void copyEfb(uint32_t ctrl) {
@@ -2742,7 +2769,7 @@ void executeCopy(uint32_t ctrl) {
     copyEfb(ctrl);
     // presenting (the hook) is timed apart from sms_gx: GXPC_GetTimes
     if (disp && g_displayCopyHook) g_displayCopyHook(dest);
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
     if (disp) pointsFrameShown();
 #endif
     if (disp && glt::active()) {  // the frame is shown: the GL thread reads its results (see gx_glthread.h)
@@ -2868,7 +2895,7 @@ static void prefetchPeeks() {
         }
 }
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
 // GLES cannot read GL_DEPTH_COMPONENT with glReadPixels. Sample the EFB
 // depth texture into exact RGB bytes, then use the normal RGBA/PBO read path.
 static GLuint androidDepthPeekSource() {
@@ -2905,8 +2932,8 @@ static GLuint androidDepthPeekSource() {
 }
 #endif
 
-#ifdef __ANDROID__
-// Android answers peeks without reading the EFB back. Reading it back where
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
+// Answer peeks without reading the EFB back. Reading it back where
 // the game peeks (the snapshots below) made Adreno's driver flush the frame
 // half drawn, after a full-screen pass for depth: Mario's occlusion test and
 // the sun's 17 lens-flare probes took 3 to 7 ms of a 16.7 ms frame. Instead a
@@ -3111,7 +3138,7 @@ static uint32_t peekSync(int x, int y, bool depth) {
     s_syncReads++;
     uint32_t v = 0;
     uint8_t px[4] = {0, 0, 0, 0};
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
     if (depth) {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, androidDepthPeekSource());
         glPixelStorei(GL_PACK_ALIGNMENT, 1);
@@ -3167,7 +3194,7 @@ static uint32_t peekRaw(int x, int y, bool depth) {
     flushBatch();
     glcInvalidate();
     GxTimer tp(&s_peekSeconds);
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
     if (pointsReady()) return pointPeek(x, y, depth);
 #endif
     if (!asyncReads() || x < 0 || y < 0 || x >= s_efbW || y >= EFB_H) return peekSync(x, y, depth);
@@ -3193,13 +3220,13 @@ static uint32_t peekRaw(int x, int y, bool depth) {
         }
         if (now.fence) glDeleteSync(now.fence);
         glBufferData(GL_PIXEL_PACK_BUFFER, bytes, nullptr, GL_STREAM_READ);
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
         glBindFramebuffer(GL_READ_FRAMEBUFFER, depth ? androidDepthPeekSource() : peekSource(false));
 #else
         glBindFramebuffer(GL_READ_FRAMEBUFFER, peekSource(depth));
 #endif
         glPixelStorei(GL_PACK_ALIGNMENT, 4);
-#ifndef __ANDROID__
+#if !(defined(__ANDROID__) || defined(SMS_GX_GLES))
         if (depth) glReadPixels(0, 0, s_efbW, EFB_H, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr);
         else
 #endif
@@ -3236,7 +3263,7 @@ uint32_t peekColor(int x, int y) {
 }
 uint32_t peekZ(int x, int y) {
     uint32_t v = peekRaw(x, y, true);
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(SMS_GX_GLES)
     v = ((v & 0xFF) << 24) | (((v >> 8) & 0xFF) << 16) | (((v >> 16) & 0xFF) << 8);
 #endif
     if (FILE* f = traceFile()) fprintf(f, "  GXPeekZ(%d,%d) = %06X\n", x, y, v >> 8);
